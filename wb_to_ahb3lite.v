@@ -106,6 +106,7 @@ parameter [1:0] IDLE   = 2'b00,
 reg             ackmask;
 reg             ctrlstart;
 wire            isburst;
+reg             mHREADY_d1;
 //////////////////////////////////
 assign isburst       = (from_m_wb_cti_o == 3'b000) ? 1'b0 : 1'b1;
 assign to_m_wb_dat_i = mHRDATA ;
@@ -117,12 +118,22 @@ assign mHSIZE        = 3'b010;                                //word
 assign mHBURST       = (ctrlstart && (from_m_wb_cti_o == 3'b010)) ? 3'b011 : 3'b000;
 
 assign mHWRITE       = from_m_wb_we_o;
-assign mHTRANS       = (ctrlstart && !ackmask)
+assign mHTRANS       = (ctrlstart && !ackmask && mHREADY)
                        ? NONSEQ
-                       : ( (from_m_wb_cti_o == 3'b010 && ctrlstart) ? SEQ : IDLE );
+                       : ((ctrlstart && ~to_m_wb_ack_i)
+                       ? NONSEQ
+                       : ( (from_m_wb_cti_o == 3'b010 && ctrlstart) ? SEQ : IDLE ));
 assign to_m_wb_err_i = mHRESP;
 assign mHSEL         = from_m_wb_cyc_o;
 assign mHREADYOUT    = 1'b1;
+
+always @(posedge clk_i or negedge rst_n_i)
+begin
+  if(!rst_n_i)
+    mHREADY_d1 <= 1'b0;
+  else
+    mHREADY_d1 <= mHREADY;
+end
 
 always @(posedge clk_i or negedge rst_n_i)
 begin
@@ -140,18 +151,23 @@ always @(posedge clk_i or negedge rst_n_i)
 begin
   if(!rst_n_i)
       ackmask <= 1'b0;
-  else if(!from_m_wb_stb_o)
+  else if(!from_m_wb_stb_o) // not set if not transmitting anything
       ackmask <= 1'b0;
-  else if(!ctrlstart && !ackmask)
+  else if(!ctrlstart && !ackmask) // not set transmission hasn't started and not ackmask yet
       ackmask <= 1'b0;
-  else if(ctrlstart && !to_m_wb_ack_i && mHREADY)
+  // else if(ctrlstart && !to_m_wb_ack_i && ~mHREADY) // if core is initialized, previous ack was 0 but target slave is not ready, not set it
+  //     ackmask <= 1'b0;
+  else if(ctrlstart && !to_m_wb_ack_i && mHREADY) // set if core is initialized, previous ack was 0 and target slave is ready
+      ackmask <= 1'b1;
+  else if(ctrlstart && !to_m_wb_ack_i && ~mHREADY_d1 && mHREADY) // set if core is initialized, previous ack was 0 and target slave is ready
       ackmask <= 1'b1;
   else if(to_m_wb_ack_i && !isburst)
       ackmask <= 1'b0;
   else if(from_m_wb_cti_o == 3'b111 && mHREADY)
       ackmask <= 1'b0;
   else
-      ackmask <= 1'b1;
+      ackmask <= 1'b0;
+      // ackmask <= 1'b1;
 end
 
 endmodule
